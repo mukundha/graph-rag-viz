@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive Graph Visualizer - Default Data</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+    }
+    svg {
+      width: 100%;
+      height: 100%;
+      border: 1px solid #ccc;
+    }
+    .node circle {
+      stroke: #333;
+      stroke-width: 1.5px;
+      cursor: pointer;
+    }
+    .link {
+      stroke: #999;
+      stroke-opacity: 0.6;
+    }
+    .label {
+      font-family: sans-serif;
+      font-size: 12px;
+      pointer-events: none;
+      fill: #000;
+    }
+    .selected-node {
+      stroke-width: 3px;
+    }
+    .selected-label {
+      font-weight: bold;
+    }
+    #file-input {
+      position: absolute;
+      z-index: 10;
+      background: #fff;
+      padding: 10px;
+    }
+  </style>
+</head>
+<body>
+  <input type="file" id="file-input" accept=".csv" multiple />
+  <svg></svg>
+  <script>
+    // Default data
+   
+
+    document.getElementById('file-input').addEventListener('change', handleFiles);
+
+    function handleFiles(event) {
+      const files = event.target.files;
+      const promises = [];
+
+      for (let i = 0; i < files.length; i++) {
+        promises.push(readFileAsText(files[i]));
+      }
+
+      Promise.all(promises).then((fileContents) => {
+        // Process all file contents
+        const allData = [];
+        fileContents.forEach((content) => {
+          // Replace escaped quotes in the entire content
+          const cleanedContent = content.replace(/\\"/g, '""');
+          const data = d3.csvParse(cleanedContent);
+          allData.push(...data);
+        });
+
+        // Now we can process allData to create the graph
+        processData(allData);
+      });
+    }
+
+    function readFileAsText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          resolve(event.target.result);
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsText(file);
+      });
+    }
+
+    function processData(csvData) {
+      const graph = { nodes: [], links: [] };
+      const nodeById = new Map();
+
+      csvData.forEach((row) => {
+        // Clean the JSON strings by replacing escaped quotes
+        const metadata_s_str = row.metadata_s.replace(/\\"/g, '"');
+        const linkFromTagsStr = row.link_from_tags.replace(/\\"/g, '"');
+
+        let metadata_s, linkFromTags;
+
+        // Parse the JSON strings safely
+        try {
+          metadata_s = JSON.parse(metadata_s_str);
+        } catch (error) {
+          console.error('Error parsing metadata_s:', error);
+          return;
+        }
+
+        try {
+          linkFromTags = JSON.parse(linkFromTagsStr);
+        } catch (error) {
+          console.error('Error parsing link_from_tags:', error);
+          return;
+        }
+
+        // Trim the suffix " — The Movie Database (TMDB)" from movie titles
+        let movieId = metadata_s.title.trim();
+        const suffix = ' — The Movie Database (TMDB)';
+        if (movieId.endsWith(suffix)) {
+          movieId = movieId.slice(0, -suffix.length).trim();
+        }
+
+        let movieNode = nodeById.get(movieId);
+        if (!movieNode) {
+          movieNode = { id: movieId, group: 'movie' };
+          nodeById.set(movieId, movieNode);
+          graph.nodes.push(movieNode);
+        }
+
+        linkFromTags.forEach(([_, keyword]) => {
+          keyword = keyword.trim();
+
+          // Ignore keywords starting with "movie" or "play_trailer"
+          if (keyword.startsWith('movie') || keyword === 'play_trailer') {
+            return; // Skip this keyword
+          }
+
+          let keywordNode = nodeById.get(keyword);
+          if (!keywordNode) {
+            keywordNode = { id: keyword, group: 'keyword' };
+            nodeById.set(keyword, keywordNode);
+            graph.nodes.push(keywordNode);
+          }
+
+          graph.links.push({ source: movieNode.id, target: keywordNode.id, value: 1 });
+        });
+      });
+
+      // Call the function to render the graph
+      renderGraph(graph);
+    }
+
+    function renderGraph(graph) {
+      // Clear any existing SVG content
+      d3.select('svg').selectAll('*').remove();
+
+      const svg = d3.select('svg');
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      // Variable to keep track of the selected node
+      let selectedNodeId = null;
+
+      // Initialize the link force with default distance
+      const linkForce = d3.forceLink(graph.links)
+        .id((d) => d.id)
+        .distance(150);
+
+      const simulation = d3
+        .forceSimulation(graph.nodes)
+        .force('link', linkForce)
+        .force('charge', d3.forceManyBody().strength(-400))
+        .force('center', d3.forceCenter(width / 2, height / 2));
+
+      // Function to update link distances
+      function updateLinkDistances() {
+        linkForce.distance((link) => {
+          if (selectedNodeId && (link.source.id === selectedNodeId || link.target.id === selectedNodeId)) {
+            return 50; // Shortened distance for links connected to selected node
+          } else {
+            return 150; // Default distance
+          }
+        });
+        simulation.alpha(1).restart();
+      }
+
+      // Zoom and Pan
+      const zoom = d3.zoom().scaleExtent([0.1, 10]).on('zoom', zoomed);
+      svg.call(zoom);
+
+      function zoomed(event) {
+        g.attr('transform', event.transform);
+      }
+
+      const g = svg.append('g');
+
+      // Draw links
+      const link = g
+        .append('g')
+        .attr('class', 'links')
+        .selectAll('line')
+        .data(graph.links)
+        .join('line')
+        .attr('class', 'link')
+        .attr('stroke-width', 1.5);
+
+      // Draw nodes
+      const node = g
+        .append('g')
+        .attr('class', 'nodes')
+        .selectAll('circle')
+        .data(graph.nodes)
+        .join('circle')
+        .attr('r', 8)
+        .attr('fill', (d) => (d.group === 'movie' ? 'blue' : 'green'))
+        .attr('class', 'node')
+        .call(
+          d3.drag().on('start', dragstarted).on('drag', dragged).on('end', dragended)
+        );
+
+      // Set up labels
+      const labels = g
+        .append('g')
+        .attr('class', 'labels')
+        .selectAll('text')
+        .data(graph.nodes)
+        .join('text')
+        .attr('class', 'label')
+        .attr('text-anchor', 'middle')
+        .attr('dy', -12)
+        .text((d) => d.id)
+        .style('display', 'none');
+
+      // Simulation tick
+      simulation.on('tick', () => {
+        link
+          .attr('x1', (d) => d.source.x)
+          .attr('y1', (d) => d.source.y)
+          .attr('x2', (d) => d.target.x)
+          .attr('y2', (d) => d.target.y);
+
+        node.attr('cx', (d) => d.x).attr('cy', (d) => d.y);
+
+        labels.attr('x', (d) => d.x).attr('y', (d) => d.y);
+      });
+
+      // Node click event to show labels for connected nodes
+      node.on('click', (event, d) => {
+        event.stopPropagation(); // Prevent triggering the background click event
+
+        // Remove previous selections
+        node.classed('selected-node', false).transition().attr('r', 8);
+        labels.classed('selected-label', false).style('display', 'none');
+        selectedNodeId = null;
+
+        // Enlarge and bolden the clicked node
+        d3.select(event.currentTarget)
+          .classed('selected-node', true)
+          .transition()
+          .attr('r', 12); // Increased size for selected node
+
+        // Find connected nodes
+        const connectedNodes = new Set();
+        connectedNodes.add(d.id);
+
+        graph.links.forEach((l) => {
+          if (l.source.id === d.id) {
+            connectedNodes.add(l.target.id);
+          } else if (l.target.id === d.id) {
+            connectedNodes.add(l.source.id);
+          }
+        });
+
+        // Enlarge and bolden connected nodes
+        node
+          .filter((n) => connectedNodes.has(n.id) && n.id !== d.id)
+          .classed('selected-node', true)
+          .transition()
+          .attr('r', 10); // Increased size for connected nodes
+
+        // Show labels for connected nodes
+        labels
+          .filter((label) => connectedNodes.has(label.id))
+          .style('display', 'block')
+          .classed('selected-label', true);
+
+        // Update selectedNodeId
+        selectedNodeId = d.id;
+
+        // Update link distances
+        updateLinkDistances();
+      });
+
+      // Background click to reset selections
+      svg.on('click', (event) => {
+        if (event.target === svg.node()) {
+          // Clicked on background
+          selectedNodeId = null;
+
+          // Reset node styles
+          node.classed('selected-node', false).transition().attr('r', 8);
+          labels.classed('selected-label', false).style('display', 'none');
+
+          // Update link distances
+          updateLinkDistances();
+        }
+      });
+
+      // Drag functions
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+
+      // Resize SVG when window size changes
+      window.addEventListener('resize', () => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        svg.attr('width', width).attr('height', height);
+        simulation.force('center', d3.forceCenter(width / 2, height / 2));
+        simulation.alpha(0.3).restart();
+      });
+    }
+  </script>
+</body>
+</html>
