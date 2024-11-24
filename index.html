@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <title>Interactive Graph Visualizer - Default Data</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="data.js"> </script> 
   <style>
     body, html {
       margin: 0;
@@ -52,6 +53,9 @@
   <script>
     // Default data
    
+    document.addEventListener('DOMContentLoaded', () => {      
+      processData(defaultCsvData);
+    });
 
     document.getElementById('file-input').addEventListener('change', handleFiles);
 
@@ -94,12 +98,14 @@
       const nodeById = new Map();
 
       csvData.forEach((row) => {
+        console.log(row)
         // Clean the JSON strings by replacing escaped quotes
         const metadata_s_str = row.metadata_s.replace(/\\"/g, '"');
         const linkFromTagsStr = row.link_from_tags.replace(/\\"/g, '"');
 
         let metadata_s, linkFromTags;
 
+        console.log(metadata_s_str)
         // Parse the JSON strings safely
         try {
           metadata_s = JSON.parse(metadata_s_str);
